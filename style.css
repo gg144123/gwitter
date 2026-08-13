@@ -71,6 +71,7 @@ body {
   align-items: center;
   gap: 6px;
 }
+.admin-only-controls[hidden] { display: none; }
 
 .icon-btn {
   display: inline-flex;
@@ -91,6 +92,7 @@ body {
 }
 .icon-btn:hover { background: rgba(0, 0, 0, 0.65); }
 .icon-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.icon-btn[hidden] { display: none; }
 
 .icon-btn.ghost {
   padding: 4px 10px;
@@ -230,6 +232,7 @@ body {
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
 }
+.compose[hidden] { display: none; }
 
 .compose-row {
   display: flex;
