@@ -160,7 +160,12 @@ const els = {
   fLocation: document.getElementById('fLocation'),
   fJoined: document.getElementById('fJoined'),
   fAvatar: document.getElementById('fAvatar'),
-  fCover: document.getElementById('fCover'),
+  fCoverPreview: document.getElementById('fCoverPreview'),
+  fCoverPreviewImg: document.getElementById('fCoverPreviewImg'),
+  fCoverEmptyText: document.getElementById('fCoverEmptyText'),
+  fCoverPickBtn: document.getElementById('fCoverPickBtn'),
+  fCoverRemoveBtn: document.getElementById('fCoverRemoveBtn'),
+  fCoverInput: document.getElementById('fCoverInput'),
   fPasscode: document.getElementById('fPasscode'),
 };
 
@@ -1045,6 +1050,48 @@ els.posts.addEventListener('click', async (e) => {
 
 /* ---- profile edit ---- */
 
+let selectedCoverFile = null;
+let coverRemoved = false;
+
+function setCoverPreview(url) {
+  if (url) {
+    els.fCoverPreviewImg.src = url;
+    els.fCoverPreviewImg.hidden = false;
+    els.fCoverEmptyText.hidden = true;
+    els.fCoverRemoveBtn.hidden = false;
+  } else {
+    els.fCoverPreviewImg.src = '';
+    els.fCoverPreviewImg.hidden = true;
+    els.fCoverEmptyText.hidden = false;
+    els.fCoverRemoveBtn.hidden = true;
+  }
+}
+
+els.fCoverPickBtn.addEventListener('click', () => els.fCoverInput.click());
+
+els.fCoverInput.addEventListener('change', () => {
+  const file = els.fCoverInput.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    els.editMsg.textContent = '이미지는 5MB 이하로 올려주세요.';
+    els.fCoverInput.value = '';
+    return;
+  }
+  els.editMsg.textContent = '';
+  selectedCoverFile = file;
+  coverRemoved = false;
+  const reader = new FileReader();
+  reader.onload = () => setCoverPreview(reader.result);
+  reader.readAsDataURL(file);
+});
+
+els.fCoverRemoveBtn.addEventListener('click', () => {
+  selectedCoverFile = null;
+  coverRemoved = true;
+  els.fCoverInput.value = '';
+  setCoverPreview('');
+});
+
 function openEditPanel() {
   if (currentProfile) {
     els.fName.value = currentProfile.name || '';
@@ -1053,8 +1100,11 @@ function openEditPanel() {
     els.fLocation.value = currentProfile.location || '';
     els.fJoined.value = currentProfile.joined_label || '';
     els.fAvatar.value = currentProfile.avatar_url || '';
-    els.fCover.value = currentProfile.cover_url || '';
+    setCoverPreview(currentProfile.cover_url || '');
   }
+  selectedCoverFile = null;
+  coverRemoved = false;
+  els.fCoverInput.value = '';
   els.fPasscode.value = '';
   els.editMsg.textContent = '';
   els.editMsg.classList.remove('ok');
@@ -1085,13 +1135,34 @@ els.editForm.addEventListener('submit', async (e) => {
   els.editMsg.textContent = '';
   els.editMsg.classList.remove('ok');
 
+  let coverUrl = currentProfile?.cover_url || '';
+  if (coverRemoved) coverUrl = '';
+
+  if (selectedCoverFile) {
+    if (DEMO_MODE) {
+      coverUrl = els.fCoverPreviewImg.src;
+    } else {
+      const ext = (selectedCoverFile.name.split('.').pop() || 'jpg').toLowerCase();
+      const path = `cover/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: uploadError } = await client.storage.from('guestbook-images').upload(path, selectedCoverFile);
+      if (uploadError) {
+        console.error(uploadError);
+        els.editSaveBtn.disabled = false;
+        els.editMsg.textContent = '배경 사진 업로드에 실패했어요. 잠시 후 다시 시도해주세요.';
+        return;
+      }
+      const { data: pub } = client.storage.from('guestbook-images').getPublicUrl(path);
+      coverUrl = pub.publicUrl;
+    }
+  }
+
   const nextProfile = {
     name: els.fName.value.trim(),
     handle: els.fHandle.value.trim().replace(/^@/, ''),
     bio: els.fBio.value.trim(),
     location: els.fLocation.value.trim(),
     avatar_url: els.fAvatar.value.trim(),
-    cover_url: els.fCover.value.trim(),
+    cover_url: coverUrl,
     joined_label: els.fJoined.value.trim(),
   };
 

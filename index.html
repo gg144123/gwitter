@@ -166,17 +166,27 @@
         <label for="fJoined">가입/시작 문구</label>
         <input id="fJoined" maxlength="40" placeholder="예: 2021년부터" />
       </div>
-      <div class="field-row">
-        <div class="field">
-          <label for="fAvatar">프로필 사진 URL</label>
-          <input id="fAvatar" placeholder="https://..." />
-        </div>
-        <div class="field">
-          <label for="fCover">배경 사진 URL</label>
-          <input id="fCover" placeholder="https://..." />
-        </div>
+      <div class="field">
+        <label for="fAvatar">프로필 사진 URL</label>
+        <input id="fAvatar" placeholder="https://..." />
+        <p class="field-hint">이미지 URL이 없으면 이니셜 아바타가 표시돼요.</p>
       </div>
-      <p class="field-hint">이미지 URL이 없으면 이니셜 아바타와 기본 배경이 표시돼요.</p>
+
+      <div class="field">
+        <label>배경 사진</label>
+        <div class="cover-upload">
+          <div class="cover-upload-preview" id="fCoverPreview">
+            <span id="fCoverEmptyText">사진 없음</span>
+            <img id="fCoverPreviewImg" alt="배경 사진 미리보기" hidden />
+          </div>
+          <div class="cover-upload-actions">
+            <button type="button" class="btn-secondary" id="fCoverPickBtn">사진 선택</button>
+            <button type="button" class="btn-secondary" id="fCoverRemoveBtn" hidden>제거</button>
+          </div>
+          <input type="file" id="fCoverInput" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+        </div>
+        <p class="field-hint">권장 크기 1500×500px (가로:세로 3:1), 5MB 이하. 사진 없으면 기본 배경이 표시돼요.</p>
+      </div>
 
       <div class="field passcode-field">
         <label for="fPasscode">편집 비밀번호</label>
