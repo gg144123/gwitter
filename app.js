@@ -410,6 +410,8 @@ function renderPlaylist(rows) {
 async function loadPlaylist() {
   if (DEMO_MODE) {
     renderPlaylist(demoLoadPlaylist());
+    playlistReadyForAutoplay = true;
+    maybeAutoplay();
     return;
   }
   const { data, error } = await client
@@ -421,9 +423,31 @@ async function loadPlaylist() {
     return;
   }
   renderPlaylist(data);
+  playlistReadyForAutoplay = true;
+  maybeAutoplay();
 }
 
 /* ---- music player ---- */
+
+let hasInteracted = false;
+let playlistReadyForAutoplay = false;
+
+function maybeAutoplay() {
+  if (!hasInteracted || !playlistReadyForAutoplay) return;
+  if (currentTrackIndex !== -1) return;
+  if (!playlistTracks.length) return;
+  ensureYouTubeApi();
+  playTrackAt(0);
+}
+
+function armAutoplay() {
+  if (hasInteracted) return;
+  hasInteracted = true;
+  maybeAutoplay();
+}
+['pointerdown', 'keydown'].forEach((evt) => {
+  document.addEventListener(evt, armAutoplay, { once: true, passive: true });
+});
 
 function playIcon() {
   return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
