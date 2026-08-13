@@ -37,6 +37,34 @@
     </div>
   </section>
 
+  <section class="player-bar">
+    <div class="player-controls">
+      <button class="player-btn" id="prevBtn" type="button" aria-label="이전 곡" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+      </button>
+      <button class="player-btn player-btn-main" id="playBtn" type="button" aria-label="재생" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      </button>
+      <button class="player-btn" id="nextBtn" type="button" aria-label="다음 곡" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+      </button>
+    </div>
+    <div class="player-meta">
+      <p class="player-title" id="playerTitle">재생할 곡이 없어요</p>
+      <p class="player-artist" id="playerArtist"></p>
+    </div>
+    <button class="player-more" id="playerMoreBtn" type="button" aria-label="플레이리스트 열기" aria-expanded="false">⋯</button>
+  </section>
+
+  <div class="playlist-panel" id="playlistPanel">
+    <div class="playlist-header">
+      <h3>플레이리스트</h3>
+      <button class="icon-btn ghost" id="playlistAddBtn" type="button" hidden>+ 곡 추가</button>
+    </div>
+    <ul class="playlist-list" id="playlistList"></ul>
+  </div>
+  <div class="yt-player-hidden"><div id="ytPlayer"></div></div>
+
   <div class="tabs" role="tablist">
     <button class="tab-btn is-active" id="tabBtnPosts" type="button" data-tab="posts" role="tab" aria-selected="true">게시물</button>
     <button class="tab-btn" id="tabBtnGuestbook" type="button" data-tab="guestbook" role="tab" aria-selected="false">방명록</button>

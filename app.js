@@ -4,6 +4,7 @@ const client = DEMO_MODE ? null : supabase.createClient(SUPABASE_URL, SUPABASE_A
 const DEMO_PROFILE_KEY = 'guestbook_demo_profile';
 const DEMO_ENTRIES_KEY = 'guestbook_demo_entries';
 const DEMO_POSTS_KEY = 'guestbook_demo_posts';
+const DEMO_PLAYLIST_KEY = 'guestbook_demo_playlist';
 const DEMO_PASSCODE = '1234';
 const ADMIN_KEY = 'guestbook_is_admin';
 
@@ -51,6 +52,14 @@ function demoSavePosts(rows) {
   localStorage.setItem(DEMO_POSTS_KEY, JSON.stringify(rows));
 }
 
+function demoLoadPlaylist() {
+  const stored = localStorage.getItem(DEMO_PLAYLIST_KEY);
+  return stored ? JSON.parse(stored) : [];
+}
+function demoSavePlaylist(rows) {
+  localStorage.setItem(DEMO_PLAYLIST_KEY, JSON.stringify(rows));
+}
+
 function isAdmin() {
   return localStorage.getItem(ADMIN_KEY) === 'true';
 }
@@ -96,6 +105,16 @@ const els = {
   adminLoginBtn: document.getElementById('adminLoginBtn'),
   adminControls: document.getElementById('adminControls'),
   logoutBtn: document.getElementById('logoutBtn'),
+
+  prevBtn: document.getElementById('prevBtn'),
+  playBtn: document.getElementById('playBtn'),
+  nextBtn: document.getElementById('nextBtn'),
+  playerTitle: document.getElementById('playerTitle'),
+  playerArtist: document.getElementById('playerArtist'),
+  playerMoreBtn: document.getElementById('playerMoreBtn'),
+  playlistPanel: document.getElementById('playlistPanel'),
+  playlistList: document.getElementById('playlistList'),
+  playlistAddBtn: document.getElementById('playlistAddBtn'),
 
   tabBtnPosts: document.getElementById('tabBtnPosts'),
   tabBtnGuestbook: document.getElementById('tabBtnGuestbook'),
@@ -147,6 +166,11 @@ const els = {
 
 let currentProfile = null;
 let lastPostsData = [];
+let playlistTracks = [];
+let currentTrackIndex = -1;
+let ytPlayer = null;
+let ytApiReady = false;
+let pendingAutoplayTrackIndex = null;
 
 function initials(name) {
   if (!name) return '?';
@@ -172,6 +196,20 @@ function relativeTime(iso) {
   if (diffDay < 7) return `${diffDay}일 전`;
   const d = new Date(iso);
   return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function extractYoutubeId(url) {
+  const patterns = [
+    /youtube\.com\/watch\?.*v=([\w-]{11})/,
+    /youtu\.be\/([\w-]{11})/,
+    /youtube\.com\/embed\/([\w-]{11})/,
+    /youtube\.com\/shorts\/([\w-]{11})/,
+  ];
+  for (const re of patterns) {
+    const m = url.match(re);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 function locationIcon() {
@@ -338,6 +376,256 @@ async function loadPosts() {
   renderPosts(data);
 }
 
+function renderPlaylist(rows) {
+  playlistTracks = rows;
+
+  if (!rows.length) {
+    els.playlistList.innerHTML = '<li class="playlist-empty">아직 등록된 곡이 없어요.</li>';
+  } else {
+    els.playlistList.innerHTML = rows.map((track, i) => `
+      <li class="playlist-track ${i === currentTrackIndex ? 'is-active' : ''}" data-index="${i}" style="--i:${i}">
+        <span class="track-index">${i + 1}</span>
+        <div class="track-info">
+          <p class="track-title">${escapeHtml(track.title)}</p>
+          ${track.artist ? `<p class="track-artist">${escapeHtml(track.artist)}</p>` : ''}
+        </div>
+        ${isAdmin() ? `<button class="track-del" data-id="${track.id}" type="button" title="삭제">삭제</button>` : ''}
+      </li>
+    `).join('');
+  }
+
+  els.playlistAddBtn.hidden = !isAdmin();
+
+  const hasTracks = rows.length > 0;
+  els.playBtn.disabled = !hasTracks;
+  els.prevBtn.disabled = !hasTracks;
+  els.nextBtn.disabled = !hasTracks;
+
+  if (currentTrackIndex === -1 || !rows.length) {
+    els.playerTitle.textContent = hasTracks ? '재생할 곡을 골라보세요' : '재생할 곡이 없어요';
+    els.playerArtist.textContent = '';
+  }
+}
+
+async function loadPlaylist() {
+  if (DEMO_MODE) {
+    renderPlaylist(demoLoadPlaylist());
+    return;
+  }
+  const { data, error } = await client
+    .from('playlist_tracks')
+    .select('id, youtube_id, title, artist, position')
+    .order('position', { ascending: true });
+  if (error) {
+    console.error('플레이리스트 로드 실패', error);
+    return;
+  }
+  renderPlaylist(data);
+}
+
+/* ---- music player ---- */
+
+function playIcon() {
+  return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+}
+function pauseIcon() {
+  return '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>';
+}
+
+function updatePlayerMeta(track) {
+  els.playerTitle.textContent = track.title;
+  els.playerArtist.textContent = track.artist || '';
+}
+
+function ensureYouTubeApi() {
+  if (window.YT && window.YT.Player) {
+    if (!ytPlayer) initYtPlayer();
+    return;
+  }
+  if (!document.getElementById('yt-iframe-api')) {
+    const tag = document.createElement('script');
+    tag.id = 'yt-iframe-api';
+    tag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(tag);
+  }
+  window.onYouTubeIframeAPIReady = initYtPlayer;
+}
+
+function initYtPlayer() {
+  ytPlayer = new YT.Player('ytPlayer', {
+    height: '0',
+    width: '0',
+    playerVars: { playsinline: 1 },
+    events: {
+      onReady: () => {
+        ytApiReady = true;
+        if (pendingAutoplayTrackIndex !== null) {
+          const idx = pendingAutoplayTrackIndex;
+          pendingAutoplayTrackIndex = null;
+          playTrackAt(idx);
+        }
+      },
+      onStateChange: onPlayerStateChange,
+    },
+  });
+}
+
+function onPlayerStateChange(e) {
+  if (e.data === YT.PlayerState.PLAYING) {
+    els.playBtn.innerHTML = pauseIcon();
+  } else if (e.data === YT.PlayerState.PAUSED || e.data === YT.PlayerState.CUED) {
+    els.playBtn.innerHTML = playIcon();
+  } else if (e.data === YT.PlayerState.ENDED) {
+    els.playBtn.innerHTML = playIcon();
+    playTrackAt(currentTrackIndex + 1);
+  }
+}
+
+function playTrackAt(index) {
+  if (!playlistTracks.length) return;
+  const wrapped = ((index % playlistTracks.length) + playlistTracks.length) % playlistTracks.length;
+  currentTrackIndex = wrapped;
+  const track = playlistTracks[wrapped];
+  updatePlayerMeta(track);
+  renderPlaylist(playlistTracks);
+
+  if (!ytApiReady || !ytPlayer) {
+    pendingAutoplayTrackIndex = wrapped;
+    ensureYouTubeApi();
+    return;
+  }
+  ytPlayer.loadVideoById(track.youtube_id);
+}
+
+els.playBtn.addEventListener('click', () => {
+  if (!playlistTracks.length) return;
+  if (currentTrackIndex === -1) {
+    playTrackAt(0);
+    return;
+  }
+  if (!ytApiReady || !ytPlayer) {
+    ensureYouTubeApi();
+    return;
+  }
+  const state = ytPlayer.getPlayerState();
+  if (state === YT.PlayerState.PLAYING) {
+    ytPlayer.pauseVideo();
+  } else {
+    ytPlayer.playVideo();
+  }
+});
+
+els.prevBtn.addEventListener('click', () => {
+  if (!playlistTracks.length) return;
+  playTrackAt(currentTrackIndex === -1 ? playlistTracks.length - 1 : currentTrackIndex - 1);
+});
+
+els.nextBtn.addEventListener('click', () => {
+  if (!playlistTracks.length) return;
+  playTrackAt(currentTrackIndex === -1 ? 0 : currentTrackIndex + 1);
+});
+
+els.playerMoreBtn.addEventListener('click', () => {
+  const isOpen = els.playlistPanel.classList.toggle('is-open');
+  els.playerMoreBtn.setAttribute('aria-expanded', String(isOpen));
+});
+
+els.playlistList.addEventListener('click', async (e) => {
+  const delBtn = e.target.closest('.track-del');
+  if (delBtn) {
+    const id = Number(delBtn.dataset.id);
+    const passcode = window.prompt('삭제하려면 관리자 비밀번호를 입력하세요.');
+    if (!passcode) return;
+
+    if (DEMO_MODE) {
+      if (passcode !== DEMO_PASSCODE) {
+        alert('비밀번호가 올바르지 않아요.');
+        return;
+      }
+      demoSavePlaylist(demoLoadPlaylist().filter((t) => t.id !== id));
+      if (currentTrackIndex >= 0) currentTrackIndex = -1;
+      await loadPlaylist();
+      return;
+    }
+
+    const { data, error } = await client.rpc('delete_playlist_track', { p_id: id, p_passcode: passcode });
+    if (error || !data) {
+      alert('삭제하지 못했어요. 비밀번호를 확인해주세요.');
+      return;
+    }
+    if (currentTrackIndex >= 0) currentTrackIndex = -1;
+    await loadPlaylist();
+    return;
+  }
+
+  const row = e.target.closest('.playlist-track');
+  if (row) {
+    playTrackAt(Number(row.dataset.index));
+  }
+});
+
+els.playlistAddBtn.addEventListener('click', async () => {
+  const url = window.prompt('유튜브 URL을 입력하세요.');
+  if (!url) return;
+  const youtubeId = extractYoutubeId(url.trim());
+  if (!youtubeId) {
+    alert('유튜브 링크를 인식하지 못했어요. watch?v= 또는 youtu.be 형식인지 확인해주세요.');
+    return;
+  }
+
+  let title = '';
+  let artist = '';
+  try {
+    const res = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url.trim())}&format=json`);
+    if (res.ok) {
+      const meta = await res.json();
+      title = meta.title || '';
+      artist = meta.author_name || '';
+    }
+  } catch (err) {
+    console.warn('노래 정보를 가져오지 못했어요', err);
+  }
+
+  const finalTitle = window.prompt('노래 제목', title);
+  if (finalTitle === null) return;
+  const finalArtist = window.prompt('가수', artist);
+  if (finalArtist === null) return;
+
+  const passcode = window.prompt('관리자 비밀번호를 입력하세요.');
+  if (!passcode) return;
+
+  if (DEMO_MODE) {
+    if (passcode !== DEMO_PASSCODE) {
+      alert('비밀번호가 올바르지 않아요.');
+      return;
+    }
+    const rows = demoLoadPlaylist();
+    rows.push({
+      id: Date.now(),
+      youtube_id: youtubeId,
+      title: finalTitle.trim() || '제목 없음',
+      artist: finalArtist.trim(),
+      position: rows.length,
+    });
+    demoSavePlaylist(rows);
+    await loadPlaylist();
+    return;
+  }
+
+  const { error } = await client.rpc('create_playlist_track', {
+    p_youtube_id: youtubeId,
+    p_title: finalTitle.trim() || '제목 없음',
+    p_artist: finalArtist.trim(),
+    p_passcode: passcode,
+  });
+  if (error) {
+    console.error(error);
+    alert('추가하지 못했어요. 비밀번호를 확인해주세요.');
+    return;
+  }
+  await loadPlaylist();
+});
+
 /* ---- admin session ---- */
 
 function applyAdminVisibility() {
@@ -346,6 +634,7 @@ function applyAdminVisibility() {
   els.adminControls.hidden = !admin;
   els.postForm.hidden = !admin;
   renderPosts(lastPostsData);
+  renderPlaylist(playlistTracks);
 }
 
 els.adminLoginBtn.addEventListener('click', async () => {
@@ -836,3 +1125,4 @@ applyAdminVisibility();
 loadProfile();
 loadEntries();
 loadPosts();
+loadPlaylist();

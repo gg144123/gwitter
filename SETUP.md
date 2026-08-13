@@ -375,3 +375,69 @@ grant execute on function delete_post to anon;
 - 사이트에 처음 들어가면 우측 상단에 **"🔒 관리자"** 버튼만 보이고, "프로필 편집"은 안 보여요. 그 버튼을 눌러 관리자 비밀번호(2번 단계에서 설정한 것)를 입력해야만 "프로필 편집"과 "로그아웃"이 나타나요. (이 로그인 상태는 이 브라우저에만 저장돼요 — 다른 기기/브라우저에서는 다시 로그인해야 해요.)
 - 상단 탭이 **게시물 / 방명록** 두 개로 나뉘어요. "게시물"은 관리자로 로그인했을 때만 글쓰기 창이 보이는, 오너 전용 피드예요.
 - "방명록"에 글을 쓸 때 작성자/비밀번호/할 말 세 칸을 입력해요. 그 글의 "수정"·"삭제"는 **글쓴이 본인이 설정한 비밀번호** 또는 **관리자 비밀번호** 둘 중 하나로 가능해요.
+
+## 7. (추가 기능) 배경 음악 플레이어
+
+새 쿼리 창에 아래 SQL을 실행해주세요.
+
+```sql
+create table if not exists playlist_tracks (
+  id bigint generated always as identity primary key,
+  youtube_id text not null,
+  title text not null,
+  artist text,
+  position int not null default 0,
+  created_at timestamptz not null default now()
+);
+alter table playlist_tracks enable row level security;
+
+create policy "playlist is publicly readable" on playlist_tracks
+  for select using (true);
+
+create or replace function create_playlist_track(
+  p_youtube_id text, p_title text, p_artist text, p_passcode text
+) returns bigint
+language plpgsql
+security definer
+as $$
+declare ok boolean;
+declare new_id bigint;
+declare next_pos int;
+begin
+  select (passcode_hash = crypt(p_passcode, passcode_hash)) into ok
+  from profile where id = 1;
+  if not coalesce(ok, false) then
+    raise exception 'invalid passcode';
+  end if;
+
+  select coalesce(max(position), -1) + 1 into next_pos from playlist_tracks;
+
+  insert into playlist_tracks (youtube_id, title, artist, position)
+  values (p_youtube_id, p_title, nullif(p_artist, ''), next_pos)
+  returning id into new_id;
+
+  return new_id;
+end;
+$$;
+grant execute on function create_playlist_track to anon;
+
+create or replace function delete_playlist_track(p_id bigint, p_passcode text)
+returns boolean
+language plpgsql
+security definer
+as $$
+declare ok boolean;
+begin
+  select (passcode_hash = crypt(p_passcode, passcode_hash)) into ok
+  from profile where id = 1;
+  if not coalesce(ok, false) then
+    return false;
+  end if;
+  delete from playlist_tracks where id = p_id;
+  return true;
+end;
+$$;
+grant execute on function delete_playlist_track to anon;
+```
+
+이제 프로필 아래에 재생 바(◀◀ ▶ ▶▶ + 곡 제목/가수 + ⋯)가 생겨요. 관리자로 로그인한 상태에서 ⋯를 누르면 플레이리스트가 펼쳐지고 "+ 곡 추가" 버튼이 보여요. 유튜브 URL만 넣으면 제목·가수를 자동으로 가져오고(직접 수정도 가능), 방문자는 재생만 할 수 있고 곡 추가·삭제는 관리자만 할 수 있어요.
